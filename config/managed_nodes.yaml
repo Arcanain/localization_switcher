@@ -1,0 +1,11 @@
+managed_nodes:
+  - key: "gnss"
+    node_name: "/gnss_localizer"
+    change_state_service: "/gnss_localizer/change_state"
+    active_states: ["active"]           # どのLC状態をactiveと見なすか
+    # optional: lc_state_topic: "/gnss_localizer/state"
+
+  - key: "emcl"
+    node_name: "/emcl"
+    change_state_service: "/emcl/change_state"
+    active_states: ["active"]

@@ -1,22 +1,17 @@
 // localization_switcher_node.hpp
 
 #pragma once
-
-#include <array>
-#include <vector>
 #include <memory>
+#include <chrono>
 #include <string>
 
 #include "rclcpp/rclcpp.hpp"
-#include "geometry_msgs/msg/twist.hpp"
-#include "geometry_msgs/msg/pose_stamped.hpp"
 #include "nav_msgs/msg/odometry.hpp"
-#include "visualization_msgs/msg/marker_array.hpp"
-#include "tf2_ros/static_transform_broadcaster.h"
+#include "sensor_msgs/msg/nav_sat_fix.hpp"
+#include "lifecycle_msgs/srv/change_state.hpp"
 
-
-// Localization Switcher 
-// Nodeクラス（ROSインターフェース部分のみでロジックとは切り離す）
+#include "localization_switcher/component/localization_switcher_component.hpp"
+#include "localization_switcher/component/common_types.hpp"
 
 namespace localization_switcher
 {
@@ -28,43 +23,42 @@ public:
   ~LocalizationSwitchNode() = default;
 
 private:
-  // privateは，クラスの外からアクセスできない．
-  void timerCallback();
+  // === Core Timer Loop ===
+  void timerCallback();  // 定期的にtickを呼び出す
 
-  // 用途によってsubは変わる
-  void odomCallback(const nav_msgs::msg::Odometry::SharedPtr msg);
-  void local_obstacle_callback(const visualization_msgs::msg::MarkerArray::SharedPtr msg);
-  void target_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg);
+  // === ROS Subscriber Callbacks ===
+  void onOdom(const nav_msgs::msg::Odometry::SharedPtr msg);
+  void onFix(const sensor_msgs::msg::NavSatFix::SharedPtr msg);
 
-  void send_static_transform();
+  // === Lifecycle Management ===
+  void pollManagedStates();  // 各Lifecycleノードのactive状態を取得
+  void executeTransitionRecipe(const TransitionRecipe &recipe);
+  void notifyTransitionResult(const ExecResult &result,
+                              const std::chrono::steady_clock::time_point &now);
 
-  // Subscriber
+  // === Internal Helpers ===
+  WorldState buildWorldState() const;  // トピックデータを整形
+  ManagedState buildManagedState() const;  // ライフサイクル状態を整形
+
+private:
+  // --- Component ---
+  std::shared_ptr<LocalizationSwitcherComponent> component_;
+
+  // --- ROS Interfaces ---
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odom_sub_;
-  rclcpp::Subscription<visualization_msgs::msg::MarkerArray>::SharedPtr local_obstacle_sub_;
-  rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr target_sub_;
-
-  // Publisher
-  rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
-
-  // Timer
+  rclcpp::Subscription<sensor_msgs::msg::NavSatFix>::SharedPtr fix_sub_;
   rclcpp::TimerBase::SharedPtr timer_;
-  std::shared_ptr<tf2_ros::StaticTransformBroadcaster> static_broadcaster_;
 
-  // States
-  std::array<double, 5> x_;
-  std::array<double, 2> goal_;
-  std::vector<std::array<double, 2>> obstacle_;
+  // --- Lifecycle Clients ---
+  rclcpp::Client<lifecycle_msgs::srv::ChangeState>::SharedPtr gnss_lc_client_;
+  rclcpp::Client<lifecycle_msgs::srv::ChangeState>::SharedPtr emcl_lc_client_;
 
-  // DWA param
-  std::array<double, 6> kinematic_;
-  std::array<double, 4> eval_param_;
+  // --- Node State (data cache) ---
+  WorldState world_;
+  ManagedState managed_;
 
-  double robot_radius_;
-  double obstacle_radius_;
-
-  bool received_obstacles_;
-  bool received_goal_;
-  bool received_odom_;
+  bool executing_transition_{false};
+  std::chrono::steady_clock::time_point last_tick_time_;
 };
 
-} // namespace dwa_planner
+}  // namespace localization_switcher

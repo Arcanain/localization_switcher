@@ -1,107 +1,70 @@
 // localization_swithcer_component.hpp
 
 #pragma once
-#include "rclcpp/time.hpp"
+#include <vector>
+#include <chrono>
 
 namespace localization_switcher
 {
 
+  // 自己位置推定手法切り替えのロジック(宣言のみ)
+  /*
+  Lifecycle nodeを管理するにあたってロボットのマシンを管理する必要があるのでインスタンス化することにした
+  */
 
+  struct Waypoint
+  {
+    double x;
+    double y;
+    double radius;
+  };
 
-// 自己位置推定手法切り替えのロジック(静的メソッドのみ，宣言のみ)
+  class LocalizationSwitcherComponent
+  {
+  public:
+    LocalizationSwitcherComponent();
 
-/*
-ノードの機能：
-  - サブスクライバから外界の状態を受け取る
-    自己位置推定の結果，推定の信頼度
-  - 現在の自己位置推定の手法が何か→現在の状態を監視する
-  - LocalizationSwicherのDecisionの返り値？に応じて，自己位置推定の手法を切り替える
+    // 初期化用メソッド
+    void setParameters(
+        const std::vector<Waypoint> &gnss_activation_points, // GNSSが開始する地点
+        const std::vector<Waypoint> &emcl_activation_points, // EMCLが開始する地点
+        double duration_to_gnss, double duration_to_emcl);
+    void initialize();
 
-LcalizationSwitcerの機能：
+    // --- 状態更新用メソッド ---
+    void updateGnssPose(double x, double y);
+    void updateFixStatus(bool fix_status); // TODO tipicを受け取るので，ここはstrかもしれない．あとで確認
 
+    // --- 意思決定メソッド ---
+    bool shouldSwitchToGnss(const std::chrono::steady_clock::time_point &current_time);
+    bool shouldSwitchToEmcl(const std::chrono::steady_clock::time_point &current_time);
 
-①emclがactiveな時にgnssに遷移する条件を満たしたらtrueを返す
-  実装はcppが行うのでここでは宣言のみ
-  返り値はbool, 引数の設計が悩みどころだが，fix値（str?）, gnss poseを受け取ることを考える
-  そのまま受け渡すとrosに依存してしまうので，ここでは依存しないようにstructで定義する
-  timestampも必要
-  例)
-struct PoseWithCovarianceStamped
-{
-  int sec;
-  int nsec;
-  double x;
-  double y;
-  double z;
-  double qx;
-  double qy;
-  double qz;
-  double qw;
-  double covariance[36];
-};  
-みたいな感じ？
+    // --- 状態リセット用メソッド ---
 
+    void resetGnssActivation(); // 機能？
+    void resetEmclActivation(); // 機能？
 
-②gnssがactiveな時にemclに遷移する条件を満たしたらtrueを返す
-  実装はcppが行うのでここでは宣言のみ
-　  返り値はbool, 引数の設計が悩みどころだが，str(これはfix値), gnss poseを受け取ることを考える
+  private:
 
-③切り替え条件はあらかじめ何らかの方法で表現し，yamlから読み込む
-  例)閾値を超えたら，ある時間以上継続したら，など
-  条件はかなり複雑になるはず．例えばemcl -> gnss, gnss->emclで閾値が異なるなど
-  それぞれのロジックをじっそうするが，その時のパラメータはyamlから読み込む
-  2つの遷移によってパラメータが異なる可能性を考えると，どのようにyamlのデータ表現を設計するかが悩みどころ
+    // --- 設定値 (YAMLから読み込む) ---
+    double duration_to_gnss_;
+    double duration_to_emcl_;
+    std::vector<Waypoint> gnss_activation_points_;
+    std::vector<Waypoint> emcl_activation_points_;
 
+    // --- 状態変数 ---
+    size_t gnss_waypoint_index_;
+    size_t emcl_waypoint_index_;
 
+    // 遷移地点に到達した時刻を保存する変数
+    std::chrono::steady_clock::time_point gnss_transition_timer_start_;
+    std::chrono::steady_clock::time_point emcl_transition_timer_start_;
 
+    double current_x_ ;
+    double current_y_ ;
+    bool current_fix_status_ ;
+    Waypoint current_target_wp_{0.0, 0.0, 0.0}; // ゼロ初期化してOK?
+    bool reach_flag_ = false;                   // GNSS切り替えゾーンに到達したか
+  };
 
-
-*/
-
-struct Waypoint {
-  double x;
-  double y;
-  double radius;
-};
-
-
-class LocalizationSwitcherComponent
-{
-public:
-  LocalizationSwitcherComponent();
-
-  
-  void setParameters(
-    const std::vector<Waypoint> & gnss_activation_waypoints,
-    const std::vector<Waypoint> & emcl_activation_waypoints,
-    double duration_to_gnss, double duration_to_emcl,
-    double target_radius);
-
-  // --- 意思決定メソッド ---
-  bool shouldSwitchToGnss(const rclcpp::Time & current_time);
-  bool shouldSwitchToEmcl(const rclcpp::Time & current_time);
-  void reset();
-
-private:
-  // --- 設定値 ---
-  double duration_to_gnss_; // GNSSに切り替えるまでの継続時間
-  double duration_to_emcl_; // EMCLに切り替えるまでの継続時間
-  double target_radius_;    // ウェイポイントに到達したとみなす半径(m)
-
-  std::vector<Waypoint> gnss_activation_waypoints_; // GNSSに切り替えるためのウェイポイント群
-  std::vector<Waypoint> emcl_activation_waypoints_; // EMCLに切り替えるためのウェイポイント群
-
-  size_t gnss_waypoint_index_ = 0; // gnss開始ポイントのインデックス size_tは符号なし整数の型
-  size_t emcl_waypoint_index_ = 0; // emcl開始ポイントのインデックス
-
-};
-
-  // 
-  rclcpp::Time first_gnss_ok_time_;
-  rclcpp::Time first_gnss_lost_time_;
-  double current_x_;
-  double current_y_;
-  bool current_fix_ok_;
-};
 } // namespace localization_switcher
-

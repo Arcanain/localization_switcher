@@ -1,0 +1,33 @@
+nodes:
+  - id: GNSS_ONLY
+    semantic: { gnss: true,  emcl: false }    # ← キーは managed_nodes.yaml の key と一致
+    allowed: true
+
+  - id: EMCL_ONLY
+    semantic: { gnss: false, emcl: true }
+    allowed: true
+
+  - id: BOTH_ACTIVE
+    semantic: { gnss: true,  emcl: true }
+    allowed: false
+
+  - id: BOTH_INACTIVE
+    semantic: { gnss: false, emcl: false }
+    allowed: true
+
+edges:
+  - from: GNSS_ONLY
+    to: EMCL_ONLY
+    recipe:
+      steps:
+        - { target_key: "emcl", operation: "configure",  timeout_s: 5.0 }
+        - { target_key: "emcl", operation: "activate",   timeout_s: 5.0 }
+        - { target_key: "gnss", operation: "deactivate", timeout_s: 5.0 }
+
+  - from: EMCL_ONLY
+    to: GNSS_ONLY
+    recipe:
+      steps:
+        - { target_key: "gnss", operation: "configure",  timeout_s: 5.0 }
+        - { target_key: "gnss", operation: "activate",   timeout_s: 5.0 }
+        - { target_key: "emcl", operation: "deactivate", timeout_s: 5.0 }
