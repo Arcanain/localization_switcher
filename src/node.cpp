@@ -26,7 +26,7 @@ Node::Node(const std::string & id)
         }
     }
 
-    const std::vector<Node*>& Node::next_nodes() const{
+    const std::vector<Node*>& Node::get_next() const{
         return next_nodes_;
     }
 
