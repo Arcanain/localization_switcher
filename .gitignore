@@ -1,4 +1,7 @@
 .vscode
 .vscode/*
 
+.idea
+.vscode
+
 memo.md
