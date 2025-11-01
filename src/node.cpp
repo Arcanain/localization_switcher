@@ -1,33 +1,31 @@
-#include "localization_switcher/node.hpp"
+#include "localization_switcher/component/node.hpp"
+#include <utility> // std::move
 
 namespace localization_switcher
 {
 
+    Node::Node( std::string id,
+                std::unordered_map<std::string, TransitionRecipe> next,
+                SemanticState semantic)
+        : id_(std::move(id)), next_(std::move(next)), semantic_(std::move(semantic)) {}
 
-Node::Node(const std::string & id)
-    : id_(id)
-    {}
+    const std::string &Node::id() const noexcept { return id_; }
 
-    bool Node::operator==(const Node& other) const{
-        return id_ == other.id_;
+    std::vector<std::string> Node::next_ids() const
+    {
+        std::vector<std::string> keys;
+        keys.reserve(next_.size());
+        for (const auto &kv : next_)
+            keys.push_back(kv.first);
+        return keys;
     }
 
-    bool Node::operator!=(const Node& other) const{
-        return id_ != other.id_;
+    const TransitionRecipe *Node::recipe_to(const std::string &to_id) const noexcept
+    {
+        auto it = next_.find(to_id);
+        return it == next_.end() ? nullptr : &it->second;
     }
 
-    std::string Node::to_string()const{
-    return id_;
-    }
-
-    void Node::add_next(Node* next_node){
-        if(std::find(next_nodes_.begin(), next_nodes_.end(),next_node) == next_nodes_.end()){
-            next_nodes_.push_back(next_node);
-        }
-    }
-
-    const std::vector<Node*>& Node::get_next() const{
-        return next_nodes_;
-    }
+    const SemanticState &Node::semantic() const noexcept { return semantic_; }
 
 } // namespace localization_switcher

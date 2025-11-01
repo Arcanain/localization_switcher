@@ -1,30 +1,31 @@
-// include/loacalization_switcher/node.hpp
 #pragma once
 #include <string>
-#include <string>
+#include <unordered_map>
 #include <vector>
+
+#include "localization_switcher/component/common_types.hpp"
 
 namespace localization_switcher
 {
 
-    // 状態ノード：一意なID(文字列)だけを持つ
     class Node
     {
     public:
-        // コンストラクタ：常に明示的にIDを渡して生成する
-        explicit Node(const std::string &id) : id_(id) {}
+        Node(std::string id,                                        // node_id
+            std::unordered_map<std::string, TransitionRecipe> next, // to_id -> recipe
+            SemanticState semantic                                  // nodeに対応するlifecycleの状態の組み合わせ
+        );
 
-        // 等価性：id が同じなら同一ノードとみなす
-        bool operator==(const Node &other) const; 
-        bool operator!=(const Node &other) const;
 
-        std::string to_string() const { return id_; }
+        const std::string &id() const;
+        std::vector<std::string> next_ids() const;
+        const TransitionRecipe* recipe_to(const std::string& to_id) const noexcept; 
+        const SemanticState& semantic() const noexcept;
 
-        void add_next(Node* next_node);
-        const std::vector<Node*>& get_next() const;
-
+    private:
         std::string id_;
-        std::vector<Node*> next_nodes_;
+        std::unordered_map<std::string, TransitionRecipe> next_;
+        SemanticState semantic_;
     };
 
 } // namespace localization_switcher

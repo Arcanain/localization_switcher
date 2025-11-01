@@ -1,146 +1,148 @@
-// localization_switcher_component.cpp
-
-#include "localization_switcher/localization_switcher_component.hpp"
+// localization_switcher/component/localization_switcher_component.cpp
+#include "localization_switcher/component/localization_switcher_component.hpp"
 #include <cmath>
+#include <utility>
 
 namespace localization_switcher
 {
-  // コンストラクタ
-  LocalizationSwitcherComponent::LocalizationSwitcherComponent()
+
+  LocalizationSwitcherComponent::LocalizationSwitcherComponent(const std::string &yaml_path)
+      : yaml_path_(yaml_path)
   {
-    // メンバ変数の初期化
-    this->initialize();
+    initialize_(yaml_path_);
   }
 
-  // --- 初期化用メソッド ---
-  void LocalizationSwitcherComponent::setParameters(
-      const std::vector<Waypoint> &gnss_activation_points,
-      const std::vector<Waypoint> &emcl_activation_points,
-      double duration_to_gnss, double duration_to_emcl)
+  bool LocalizationSwitcherComponent::initialize_(const std::string &yaml_path)
   {
-    gnss_activation_points_ = gnss_activation_points;
-    emcl_activation_points_ = emcl_activation_points;
-    duration_to_gnss_ = duration_to_gnss;
-    duration_to_emcl_ = duration_to_emcl;
+    yaml_path_ = yaml_path;
+    graph_ = build_graph_from_yaml_(yaml_path_);
+    return true; // 将来: 失敗検知に置き換え
   }
 
-  void LocalizationSwitcherComponent::initialize()
+  Graph LocalizationSwitcherComponent::build_graph_from_yaml_(const std::string &yaml_path)
   {
-    gnss_waypoint_index_ = 0;
-    emcl_waypoint_index_ = 0;
-    reach_flag_ = false;
-    reach_flag_ = false;
-    gnss_transition_timer_start_ = {};
-    emcl_transition_timer_start_ = {};
+    (void)yaml_path;
+    return Graph{}; // TODO: yaml-cpp 等で実装
   }
 
-  void LocalizationSwitcherComponent::updateGnssPose(double x, double y)
+  const SemanticState &LocalizationSwitcherComponent::last_semantic() const noexcept
   {
-    current_x_ = x;
-    current_y_ = y;
+    return last_semantic_;
   }
 
-  void LocalizationSwitcherComponent::updateFixStatus(bool fix_status)
+  //LocalizationSwitcherComponent::TimePoint
+  
+  LocalizationSwitcherComponent::last_stamp() const noexcept
   {
-    current_fix_status_ = fix_status;
+    return last_stamp_;
   }
 
-  void LocalizationSwitcherComponent::updateCurrentTargetWaypoint(const Waypoint &wp)
+  TransitionRecipe LocalizationSwitcherComponent::decide(
+      const WorldState &world,
+      const SemanticState &semantic,
+      TimePoint stamp)
   {
-    current_target_wp_ = wp;
+    return decide_transition_(world, semantic, /*solver=*/nullptr, stamp);
   }
 
-  bool LocalizationSwitcherComponent::isInActivationZone(const Waypoint &wp)
+  TransitionRecipe LocalizationSwitcherComponent::decide_transition_(
+      const WorldState &world,
+      const SemanticState &semantic,
+      DecisionSolverPtr solver,
+      TimePoint stamp)
   {
-    double distance_to_wp = std::hypot(current_x_ - wp.x, current_y_ - wp.y);
-    return (distance_to_wp <= wp.radius);
-  }
+    last_semantic_ = semantic;
+    last_stamp_ = (stamp.time_since_epoch().count() == 0) ? Clock::now() : stamp;
 
-  // emcl -> gnss への切り替え条件を判定
-  bool LocalizationSwitcherComponent::shouldSwitchToGnss(const std::chrono::steady_clock::time_point &current_time)
-  {
+    // WorldState → 内部キャッシュ（あなたの WorldState に合わせて置換）
+    current_x_ = world.x;
+    current_y_ = world.y;
+    current_fix_status_ = world.fix_ok;
 
-    // ① 切り替え地点に到達しているか判定する
-    // 到達していない時のみ判定する，一度到達したら，切り替えの処理が終わるまでreached_flag trueのままにする
-    if (reach_flag_ == false)
+    // 現在ノードの同定（Graph の通常版。戦略付き NodeSolver を使う設計なら差し替え可）
+    if (const Node *n = graph_.get_current_node(semantic))
     {
-      reach_flag_ = isInActivationZone(current_target_wp_);
+      current_node_ = n;
+    }
+    else
+    {
+      current_node_ = nullptr;
+      return std::nullopt;
     }
 
-    // ②到達している時のみ，切り替え判定を行う．
-    /*
-    この判定ロジックは，reached_flagがtrueの時にだけ入る．reached_flagは，切り替えが終了するまでtrueのままになる．
-
-    初めてreach_flagがtrueになった時刻からタイマーを開始する．
-
-    切り替え判定：
-      タイマーが開始している時：
-        タイマー開始から duration_to_gnss_ 秒が経過している
-          trueを返す
-        経過していない
-          fix statusが2であればそのままタイマーを継続する
-          fix statueが2でない場合→タイマーをリセットする
-          falseを返す
-    　
-      タイマーが開始していない時：
-        開始する．
-        falseを返す
-    */
-
-    if (reach_flag_)
+    // 戦略ありなら全面委譲
+    if (solver)
     {
-      if (current_fix_status_)
-      {
-        // タイマーがまだ開始されていなければ、開始する
-        if (gnss_transition_timer_start_.time_since_epoch().count() == 0)
-        {
-          gnss_transition_timer_start_ = current_time;
-        }
-
-        // タイマーが開始されている場合、経過時間をチェック
-        auto duration = current_time - gnss_transition_timer_start_;
-        if (duration >= std::chrono::duration<double>(duration_to_gnss_))
-        {
-          return true; // 指定時間が経過したので、切り替え条件成立
-        }
-      }
-      else
-      {
-        // FIX状態が悪化した場合、タイマーをリセットしてやり直し
-        gnss_transition_timer_start_ = {};
-      }
+      return solver(world, semantic, *current_node_, graph_, last_stamp_);
     }
 
+    // ここから内蔵ロジック（最小限の例。不要なら常に nullopt を返すだけでよい）
+    const auto now_steady = std::chrono::steady_clock::now();
+    const bool to_gnss = shouldSwitchToGnss_(now_steady);
+    const bool to_emcl = shouldSwitchToEmcl_(now_steady);
+
+    if (!to_gnss && !to_emcl)
+      return std::nullopt;
+
+    const std::string to_id = to_gnss ? "GNSS_ONLY" : "EMCL_ONLY";
+    if (const TransitionRecipe *r = current_node_->recipe_to(to_id))
+    {
+      return *r;
+    }
+    return std::nullopt;
+  }
+
+  bool LocalizationSwitcherComponent::isInActivationZone_(const Waypoint &wp)
+  {
+    const double dx = current_x_ - wp.x;
+    const double dy = current_y_ - wp.y;
+    return std::hypot(dx, dy) <= wp.radius;
+  }
+
+  bool LocalizationSwitcherComponent::shouldSwitchToGnss_(const std::chrono::steady_clock::time_point &now)
+  {
+    if (!reach_flag_)
+      reach_flag_ = isInActivationZone_(current_target_wp_);
+    if (!reach_flag_)
+      return false;
+
+    if (current_fix_status_)
+    {
+      if (gnss_transition_timer_start_.time_since_epoch().count() == 0)
+      {
+        gnss_transition_timer_start_ = now;
+      }
+      const auto elapsed = now - gnss_transition_timer_start_;
+      if (elapsed >= std::chrono::duration<double>(duration_to_gnss_))
+        return true;
+    }
+    else
+    {
+      gnss_transition_timer_start_ = {};
+    }
     return false;
   }
 
-  // gnss -> emcl への切り替え条件を判定
-  bool LocalizationSwitcherComponent::shouldSwitchToEmcl(const std::chrono::steady_clock::time_point &current_time)
+  bool LocalizationSwitcherComponent::shouldSwitchToEmcl_(const std::chrono::steady_clock::time_point &now)
   {
-    // ① 切り替え地点に到達しているか判定する
-    if (reach_flag_ == false)
-    {
-      reach_flag_ = isInActivationZone(current_target_wp_);
-    }
+    if (!reach_flag_)
+      reach_flag_ = isInActivationZone_(current_target_wp_);
+    if (!reach_flag_)
+      return false;
 
-    if (reach_flag_)
+    if (current_fix_status_)
     {
-      if (current_fix_status_)
+      if (emcl_transition_timer_start_.time_since_epoch().count() == 0)
       {
-        if (emcl_transition_timer_start_.time_since_epoch().count() == 0)
-        {
-          emcl_transition_timer_start_ = current_time;
-        }
-        auto duration = current_time - emcl_trantision_timer_start_;
-        if (duration >= std::chrono::duration<double>(duration_to_emcl_))
-        {
-          return true;
-        }
+        emcl_transition_timer_start_ = now;
       }
-      else
-      {
-        emcl_transition_timer_start_ = {};
-      }
+      const auto elapsed = now - emcl_transition_timer_start_;
+      if (elapsed >= std::chrono::duration<double>(duration_to_emcl_))
+        return true;
+    }
+    else
+    {
+      emcl_transition_timer_start_ = {};
     }
     return false;
   }

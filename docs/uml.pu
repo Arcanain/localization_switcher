@@ -1,0 +1,84 @@
+@startuml
+skinparam packageStyle rectangle
+skinparam shadowing false
+skinparam classAttributeIconSize 0
+
+package "localization_switcher::component" as comp {
+
+  class SemanticState {
+    +enum State { UNKNOWN, UNCONFIGURED, INACTIVE, ACTIVE, FINALIZED }
+    +unordered_map<string, State> semantic_state
+    +operator==(other: SemanticState) : bool
+  }
+
+  class ActionStep {
+    +string target_key
+    +string operation
+    +double timeout_s
+  }
+
+  class TransitionRecipe {
+    +vector<ActionStep> steps
+  }
+
+  class Node {
+    -string id_
+    -unordered_map<string, TransitionRecipe> next_
+    -SemanticState semantic_
+    +Node(id: string, next: unordered_map<string, TransitionRecipe>, semantic: SemanticState)
+    +id() : string
+    +next_ids() : vector<string>
+    +recipe_to(to_id: string) : TransitionRecipe*
+    +semantic() : SemanticState
+  }
+
+  class Graph {
+    -vector<Node> nodes_
+    +Graph()
+    +Graph(nodes: vector<Node>)
+    +get_current_node(snap: SemanticState) : Node*
+    +get_current_node(snap: SemanticState, selector: NodeSelectorPtr) : Node*
+    +get_all_nodes() : vector<Node>
+    -equals_(a: SemanticState, b: SemanticState) : bool
+  }
+
+  class Component {
+    -Graph graph_
+    -Node* current_
+    -SemanticState last_semantic_
+    -TimePoint last_stamp_
+    +Component()
+    +initialize(yaml_path: string) : bool
+    +decide(world: WorldState, semantic: SemanticState, stamp: TimePoint) : TransitionRecipe
+    +last_semantic() : SemanticState
+    +last_stamp() : TimePoint
+    -build_graph_from_yaml_(yaml_path: string) : Graph
+  }
+}
+
+package "localization_switcher::strategy" as strat {
+  class NodeSelectorFunction <<typedef>>
+  class NodeSelectorPtr <<typedef>>
+}
+
+package "ros_layer" as ros {
+  class LifecycleManagerNode {
+    +timerCallback()
+    +get_state_once(node_name: string) : optional<uint8_t>
+  }
+}
+
+ros.LifecycleManagerNode --> comp.Component : uses
+comp.Component --> comp.Graph : owns
+comp.Graph --> comp.Node : contains
+comp.Node --> comp.TransitionRecipe : references
+comp.Component ..> strat.NodeSelectorPtr : optional selector
+comp.Graph ..> strat.NodeSelectorPtr : overload param
+comp.Component --> comp.SemanticState : uses
+comp.Graph --> comp.SemanticState : compares
+
+note top of comp.Graph
+  Dependency flow:
+  Node → Graph → Component → ROS Node
+end note
+@enduml
