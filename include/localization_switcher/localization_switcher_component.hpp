@@ -1,4 +1,4 @@
-// include/localization_switcher/component/localization_switcher_component.hpp
+// include/localization_switcher/localization_switcher_component.hpp
 #pragma once
 #include <string>
 #include <chrono>
@@ -6,6 +6,7 @@
 #include <memory>
 
 #include "localization_switcher/lib/graph.hpp"
+#include "localization_switcher/lib/node.hpp"
 #include "localization_switcher/common_types.hpp"
 
 namespace localization_switcher

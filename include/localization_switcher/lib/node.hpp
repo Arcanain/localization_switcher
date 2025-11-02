@@ -3,7 +3,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "localization_switcher/component/common_types.hpp"
+#include "localization_switcher/common_types.hpp"
 
 namespace localization_switcher
 {

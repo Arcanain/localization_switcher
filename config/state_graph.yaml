@@ -1,14 +1,12 @@
 lifecyclenodes:
   gnss:
     node_name: "gnss"
-
   emcl:
     node_name: "emcl2"
 
-
 nodes:
   - id: GNSS_ONLY
-    semantic: { gnss: ACTIVE,  emcl: INACTIVE }    # ← キーは managed_nodes.yaml の key と一致
+    semantic: { gnss: ACTIVE,  emcl: INACTIVE }
     allowed: true
 
   - id: EMCL_ONLY
@@ -26,16 +24,16 @@ nodes:
 edges:
   - from: GNSS_ONLY
     to: EMCL_ONLY
-    trantisionrecipe:
+    transitionrecipe:
       actionsteps:
-        - { target_key: "emcl", operation: "configure",  timeout_s: 5.0 }
-        - { target_key: "emcl", operation: "activate",   timeout_s: 5.0 }
-        - { target_key: "gnss", operation: "deactivate", timeout_s: 5.0 }
+        - { target_node_name: "emcl2", operation: "configure",  timeout_s: 5.0 }
+        - { target_node_name: "emcl2", operation: "activate",   timeout_s: 5.0 }
+        - { target_node_name: "gnss",  operation: "deactivate", timeout_s: 5.0 }
 
   - from: EMCL_ONLY
     to: GNSS_ONLY
-    trantisionrecipe:
-      actionteps:
-        - { target_key: "gnss", operation: "configure",  timeout_s: 5.0 }
-        - { target_key: "gnss", operation: "activate",   timeout_s: 5.0 }
-        - { target_key: "emcl", operation: "deactivate", timeout_s: 5.0 }
+    transitionrecipe:
+      actionsteps:
+        - { target_node_name: "gnss",  operation: "configure",  timeout_s: 5.0 }
+        - { target_node_name: "gnss",  operation: "activate",   timeout_s: 5.0 }
+        - { target_node_name: "emcl2", operation: "deactivate", timeout_s: 5.0 }
