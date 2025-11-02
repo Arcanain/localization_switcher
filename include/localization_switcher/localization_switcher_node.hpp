@@ -11,8 +11,8 @@
 #include "sensor_msgs/msg/nav_sat_fix.hpp"
 #include "lifecycle_msgs/srv/change_state.hpp"
 
-#include "localization_switcher/component/localization_switcher_component.hpp"
-#include "localization_switcher/component/common_types.hpp"
+#include "localization_switcher/localization_switcher_component.hpp"
+#include "localization_switcher/common_types.hpp"
 
 namespace localization_switcher
 {

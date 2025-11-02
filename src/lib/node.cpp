@@ -1,4 +1,4 @@
-#include "localization_switcher/component/node.hpp"
+#include "localization_switcher/lib/node.hpp"
 #include <utility> // std::move
 
 namespace localization_switcher

@@ -3,8 +3,8 @@
 #include <string>
 #include <functional>
 
-#include "localization_switcher/component/node.hpp"
-#include "localization_switcher/component/common_types.hpp"
+#include "localization_switcher/lib/node.hpp"
+#include "localization_switcher/common_types.hpp"
 
 namespace localization_switcher
 {
@@ -14,6 +14,7 @@ namespace localization_switcher
     public:
         Graph();
         explicit Graph(std::vector<Node> nodes);
+        using Selector = const Node* (*)(const SemanticState&, const std::vector<Node>&);
 
         // 値一致によって現在ノードを特定する。見つからなければ nullptr。
         const Node *get_current_node(const SemanticState &snap) const noexcept;
@@ -22,7 +23,7 @@ namespace localization_switcher
         // 引数などは今後十分に字変わりうるが，その都度strategy側で型の定義をし直す
         const Node *get_current_node(
             const SemanticState &snap,
-            NodeSolver solver) const noexcept;
+            Selector solver) const noexcept;
 
         // グラフ内の全ノードを取得
         const std::vector<Node> &get_all_nodes() const noexcept;

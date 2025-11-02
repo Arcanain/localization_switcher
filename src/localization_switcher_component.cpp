@@ -1,150 +1,77 @@
-// localization_switcher/component/localization_switcher_component.cpp
-#include "localization_switcher/component/localization_switcher_component.hpp"
+// src/localization_switcher_component.cpp
+#include "localization_switcher/localization_switcher_component.hpp"
+#include "localization_switcher/internal/transition_decider.hpp"
+#include "localization_switcher/internal/graph_builder.hpp"
 #include <cmath>
 #include <utility>
 
+namespace
+{
+  // 完全一致で最初のものを返す素朴な規則。
+  // 将来、優先キーや重み付けなどに変えるなら、この関数だけを書き換えればよい。
+  const localization_switcher::Node *
+  select_by_semantics(const localization_switcher::SemanticState &s,
+                      const std::vector<localization_switcher::Node> &nodes)
+  {
+    for (const auto &n : nodes) if (s == n.semantic()) return &n;
+    return nullptr;
+  }
+} // anonymous
+
 namespace localization_switcher
 {
-
+  // コンストラクタ
   LocalizationSwitcherComponent::LocalizationSwitcherComponent(const std::string &yaml_path)
-      : yaml_path_(yaml_path)
+      : yaml_path_(yaml_path),
+        current_node_(nullptr)
   {
-    initialize_(yaml_path_);
+    // 内部クラスのインスタンス作成
+    decider_ = std::make_unique<TransitionDecider>(*this);
+    if (!initialize_(yaml_path_)) std::cerr << "Warning: Failed to initialize LocalizationSwitcherComponent" << std::endl;
   }
+
+  // デストラクタ
+  LocalizationSwitcherComponent::~LocalizationSwitcherComponent() = default;
 
   bool LocalizationSwitcherComponent::initialize_(const std::string &yaml_path)
   {
     yaml_path_ = yaml_path;
-    graph_ = build_graph_from_yaml_(yaml_path_);
-    return true; // 将来: 失敗検知に置き換え
+
+    // GraphBuilderを使ってYAMLからGraphを構築
+    auto graph_opt = GraphBuilder::build_from_yaml(yaml_path_);
+    if (!graph_opt.has_value())
+    {
+      std::cerr << "Failed to build graph from YAML: " << yaml_path_ << std::endl;
+      return false;
+    }
+
+    graph_ = std::move(graph_opt.value());
+    return true;
   }
 
-  Graph LocalizationSwitcherComponent::build_graph_from_yaml_(const std::string &yaml_path)
-  {
-    (void)yaml_path;
-    return Graph{}; // TODO: yaml-cpp 等で実装
-  }
+  const SemanticState &LocalizationSwitcherComponent::current_semantic() const noexcept { return current_semantic_; }
 
-  const SemanticState &LocalizationSwitcherComponent::last_semantic() const noexcept
-  {
-    return last_semantic_;
-  }
+  std::chrono::system_clock::time_point LocalizationSwitcherComponent::current_stamp() const noexcept { return current_stamp_; }
 
-  //LocalizationSwitcherComponent::TimePoint
-  
-  LocalizationSwitcherComponent::last_stamp() const noexcept
-  {
-    return last_stamp_;
-  }
-
-  TransitionRecipe LocalizationSwitcherComponent::decide(
+  std::optional<TransitionRecipe> LocalizationSwitcherComponent::decide(
       const WorldState &world,
       const SemanticState &semantic,
       TimePoint stamp)
   {
-    return decide_transition_(world, semantic, /*solver=*/nullptr, stamp);
-  }
+    // セマンティック状態とタイムスタンプの更新
+    current_semantic_ = semantic;
+    current_stamp_ = (stamp.time_since_epoch().count() == 0)
+                        ? std::chrono::system_clock::now()
+                        : stamp;
 
-  TransitionRecipe LocalizationSwitcherComponent::decide_transition_(
-      const WorldState &world,
-      const SemanticState &semantic,
-      DecisionSolverPtr solver,
-      TimePoint stamp)
-  {
-    last_semantic_ = semantic;
-    last_stamp_ = (stamp.time_since_epoch().count() == 0) ? Clock::now() : stamp;
+    // 現在のノードを取得
+    current_node_ = graph_.get_current_node(current_semantic);
+    // current_node_ = graph_.get_current_node(semantic, &select_by_semantics);
+    
+    if (current_node_ == nullptr) return std::nullopt;
 
-    // WorldState → 内部キャッシュ（あなたの WorldState に合わせて置換）
-    current_x_ = world.x;
-    current_y_ = world.y;
-    current_fix_status_ = world.fix_ok;
-
-    // 現在ノードの同定（Graph の通常版。戦略付き NodeSolver を使う設計なら差し替え可）
-    if (const Node *n = graph_.get_current_node(semantic))
-    {
-      current_node_ = n;
-    }
-    else
-    {
-      current_node_ = nullptr;
-      return std::nullopt;
-    }
-
-    // 戦略ありなら全面委譲
-    if (solver)
-    {
-      return solver(world, semantic, *current_node_, graph_, last_stamp_);
-    }
-
-    // ここから内蔵ロジック（最小限の例。不要なら常に nullopt を返すだけでよい）
-    const auto now_steady = std::chrono::steady_clock::now();
-    const bool to_gnss = shouldSwitchToGnss_(now_steady);
-    const bool to_emcl = shouldSwitchToEmcl_(now_steady);
-
-    if (!to_gnss && !to_emcl)
-      return std::nullopt;
-
-    const std::string to_id = to_gnss ? "GNSS_ONLY" : "EMCL_ONLY";
-    if (const TransitionRecipe *r = current_node_->recipe_to(to_id))
-    {
-      return *r;
-    }
-    return std::nullopt;
-  }
-
-  bool LocalizationSwitcherComponent::isInActivationZone_(const Waypoint &wp)
-  {
-    const double dx = current_x_ - wp.x;
-    const double dy = current_y_ - wp.y;
-    return std::hypot(dx, dy) <= wp.radius;
-  }
-
-  bool LocalizationSwitcherComponent::shouldSwitchToGnss_(const std::chrono::steady_clock::time_point &now)
-  {
-    if (!reach_flag_)
-      reach_flag_ = isInActivationZone_(current_target_wp_);
-    if (!reach_flag_)
-      return false;
-
-    if (current_fix_status_)
-    {
-      if (gnss_transition_timer_start_.time_since_epoch().count() == 0)
-      {
-        gnss_transition_timer_start_ = now;
-      }
-      const auto elapsed = now - gnss_transition_timer_start_;
-      if (elapsed >= std::chrono::duration<double>(duration_to_gnss_))
-        return true;
-    }
-    else
-    {
-      gnss_transition_timer_start_ = {};
-    }
-    return false;
-  }
-
-  bool LocalizationSwitcherComponent::shouldSwitchToEmcl_(const std::chrono::steady_clock::time_point &now)
-  {
-    if (!reach_flag_)
-      reach_flag_ = isInActivationZone_(current_target_wp_);
-    if (!reach_flag_)
-      return false;
-
-    if (current_fix_status_)
-    {
-      if (emcl_transition_timer_start_.time_since_epoch().count() == 0)
-      {
-        emcl_transition_timer_start_ = now;
-      }
-      const auto elapsed = now - emcl_transition_timer_start_;
-      if (elapsed >= std::chrono::duration<double>(duration_to_emcl_))
-        return true;
-    }
-    else
-    {
-      emcl_transition_timer_start_ = {};
-    }
-    return false;
+    // 内部クラスに遷移判定を委譲
+    return decider_->decide_transition(world);
   }
 
 } // namespace localization_switcher

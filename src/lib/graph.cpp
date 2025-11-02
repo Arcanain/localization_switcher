@@ -1,7 +1,5 @@
 // src/graph.cpp
-
-#include "localization_switcher/graph.hpp"
-// #include "localization_swithcer/strategy.hpp" //ここに，オーバーロードした場合の関数を入れる？
+#include "localization_switcher/lib/graph.hpp"
 
 #include <algorithm>
 #include <limits>
@@ -19,19 +17,15 @@ namespace localization_switcher
     {
         for (const auto &n : nodes_)
         {
-            if (equals_(snap, n.semantic()))
-            {
-                return &n;
-            }
+            if (snap == n.semantic()) return &n;
         }
         return nullptr;
     }
 
-    // オーバーロードしたget_current_node
-    // graph.cpp
-    const Node *Graph::get_current_node(const SemanticState &snap, NodeSolver solver) const noexcept
+    const Node *Graph::get_current_node(const SemanticState &snap, Selector solver) const noexcept
     {
-        return solver(snap, nodes_); // 直接参照を渡す
+        return solver ? solver(snap, nodes_) : get_current_node(snap);
+        // return solver(snap, nodes_); // 直接参照を渡す
     }
 
     const std::vector<Node> &Graph::get_all_nodes() const noexcept
@@ -44,10 +38,7 @@ namespace localization_switcher
     {
         for (const auto &n : nodes_)
         {
-            if (n.id() == node_id)
-            {
-                return &n;
-            }
+            if (n.id() == node_id) return &n;
         }
         return nullptr;
     }

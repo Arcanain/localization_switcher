@@ -11,7 +11,7 @@ namespace localization_switcher
     {
         double x;
         double y;
-        bool fix; // GNSSがfixしているか
+        bool fix_status; // GNSSがfixしているか
         // 必要に応じて拡張（精度・速度など）
     };
 
