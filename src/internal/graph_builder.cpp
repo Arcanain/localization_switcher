@@ -1,32 +1,32 @@
 // src/graph_builder.cpp
 #include "localization_switcher/internal/graph_builder.hpp"
+#include <yaml-cpp/yaml.h>
 
 #include <algorithm>
 #include <cctype>
 #include <iostream>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 namespace localization_switcher
 {
-
   namespace
   {
-
-    // 大文字化（状態語の正規化用）
+    // 大文字化（状態語の正規化）
     std::string to_upper(std::string s)
     {
       std::transform(s.begin(), s.end(), s.begin(),
-                     [](unsigned char c)
-                     { return static_cast<char>(std::toupper(c)); });
+                      [](unsigned char c)
+                      { return static_cast<char>(std::toupper(c)); });
       return s;
     }
 
     // 文字列 → SemanticState::State（大小無視）
-    bool parse_state(const std::string &s, SemanticState::State &out)
+    bool parse_state_string(const std::string &state_str, SemanticState::State &out)
     {
-      const std::string u = to_upper(s);
+      const std::string u = to_upper(state_str);
       if (u == "UNKNOWN")
       {
         out = SemanticState::State::UNKNOWN;
@@ -55,253 +55,190 @@ namespace localization_switcher
       return false;
     }
 
-    // YAML ノードから double を安全に取り出す（既定値つき）
-    double as_double_or(const YAML::Node &n, double fallback)
+    // スカラーdoubleの取り出し（既定値つき）
+    double get_scalar_double_or(const YAML::Node &node, double fallback)
     {
-      if (!n || n.IsNull())
-        return fallback;
-      if (n.IsScalar())
-        return n.as<double>();
-      return fallback;
+      return (node && node.IsScalar()) ? node.as<double>() : fallback;
     }
 
-    // YAML ノードから bool を安全に取り出す（既定値つき）
-    bool as_bool_or(const YAML::Node &n, bool fallback)
+    // スカラーboolの取り出し（既定値つき）
+    bool get_scalar_bool_or(const YAML::Node &node, bool fallback)
     {
-      if (!n || n.IsNull())
-        return fallback;
-      if (n.IsScalar())
-        return n.as<bool>();
-      return fallback;
+      return (node && node.IsScalar()) ? node.as<bool>() : fallback;
     }
 
-    struct TmpNode
+    // nodes を一旦蓄える中間表現
+    struct TempNode
     {
       std::string id;
-      SemanticState semantic;
+      SemanticState semantic; // 実ノード名 -> 状態
       bool allowed{true};
-      std::unordered_map<std::string, TransitionRecipe> next; // to_id -> recipe
+      std::unordered_map<std::string, TransitionRecipe> outgoing; // to_id -> recipe
     };
-
-  } // anonymous namespace
+  } // namespace
 
   std::optional<Graph> GraphBuilder::build_from_yaml(const std::string &yaml_path)
   {
-    auto fail = [](const std::string &msg) -> std::optional<Graph>
+    auto fail = [](const std::string &message) -> std::optional<Graph>
     {
-      std::cerr << "GraphBuilder error: " << msg << std::endl;
+      std::cerr << "[GraphBuilder] " << message << std::endl;
       return std::nullopt;
     };
 
-    YAML::Node root;
+    YAML::Node root_doc;
     try
     {
-      root = YAML::LoadFile(yaml_path);
+      root_doc = YAML::LoadFile(yaml_path);
     }
     catch (const std::exception &e)
     {
       return fail(std::string("YAML load failed: ") + e.what());
     }
-
-    if (!root || !root.IsMap())
-    {
+    if (!root_doc || !root_doc.IsMap())
       return fail("Top-level YAML node must be a mapping.");
-    }
 
-    // lifecyclenodes: キー集合（semantic のキー検証、recipe の target_key 検証に使用）
-    const YAML::Node y_lc = root["lifecyclenodes"];
-    if (!y_lc || !y_lc.IsMap())
+    // ---- lifecyclenodes: 実ノード名（文字列）の列 ----
+    const YAML::Node lifecyclenodes_seq = root_doc["lifecyclenodes"];
+    if (!lifecyclenodes_seq || !lifecyclenodes_seq.IsSequence())
+      return fail("'lifecyclenodes' must be a sequence of node names.");
+
+    std::unordered_set<std::string> lifecycle_node_names;
+    lifecycle_node_names.reserve(lifecyclenodes_seq.size());
+
+    for (std::size_t node_i = 0; node_i < lifecyclenodes_seq.size(); ++node_i)
     {
-      return fail("'lifecyclenodes' must exist and be a mapping.");
+      const YAML::Node name_node = lifecyclenodes_seq[node_i];
+      if (!name_node.IsScalar())
+        return fail("lifecyclenodes[" + std::to_string(node_i) + "] must be a scalar string.");
+      const std::string node_name = name_node.as<std::string>();
+      if (!lifecycle_node_names.insert(node_name).second)
+        return fail("Duplicate node name in lifecyclenodes: '" + node_name + "'.");
     }
+    if (lifecycle_node_names.empty())
+      return fail("lifecyclenodes must not be empty.");
 
-    std::unordered_map<std::string, std::string> lifecycle_keys; // key -> node_name
-    for (auto it = y_lc.begin(); it != y_lc.end(); ++it)
+    // ---- nodes ----
+    const YAML::Node nodes_seq = root_doc["nodes"];
+    if (!nodes_seq || !nodes_seq.IsSequence())
+      return fail("'nodes' must be a sequence.");
+
+    std::unordered_map<std::string, TempNode> accumulators_by_id;
+    accumulators_by_id.reserve(nodes_seq.size());
+
+    for (std::size_t idx = 0; idx < nodes_seq.size(); ++idx)
     {
-      const std::string key = it->first.as<std::string>();
-      const YAML::Node v = it->second;
-      const YAML::Node name = v["node_name"];
-      if (!name || !name.IsScalar())
-      {
-        return fail("lifecyclenodes['" + key + "'].node_name must be scalar.");
-      }
-      if (lifecycle_keys.count(key))
-      {
-        return fail("Duplicate lifecyclenodes key: '" + key + "'.");
-      }
-      lifecycle_keys.emplace(key, name.as<std::string>());
-    }
-    if (lifecycle_keys.empty())
-    {
-      return fail("lifecyclenodes must contain at least one entry.");
-    }
+      const YAML::Node node_map = nodes_seq[idx];
+      if (!node_map.IsMap()) return fail("nodes[" + std::to_string(idx) + "] must be a mapping.");
 
-    // nodes: まず中間表現に溜める（edges 取り込み後に Node を一括生成するため）
-    const YAML::Node y_nodes = root["nodes"];
-    if (!y_nodes || !y_nodes.IsSequence())
-    {
-      return fail("'nodes' must exist and be a sequence.");
-    }
+      const YAML::Node id_node = node_map["id"];
+      if (!id_node || !id_node.IsScalar()) return fail("nodes[" + std::to_string(idx) + "].id must be scalar.");
+      const std::string state_id = id_node.as<std::string>();
+      if (accumulators_by_id.count(state_id))
+        return fail("Duplicate node id: '" + state_id + "'.");
 
-    std::unordered_map<std::string, TmpNode> tmp_by_id;
-    tmp_by_id.reserve(y_nodes.size());
+      TempNode temp_node;
+      temp_node.id = state_id;
+      temp_node.allowed = get_scalar_bool_or(node_map["allowed"], true);
 
-    for (std::size_t i = 0; i < y_nodes.size(); ++i)
-    {
-      const YAML::Node yn = y_nodes[i];
-      if (!yn.IsMap())
+      const YAML::Node semantic_map = node_map["semantic"];
+      if (!semantic_map || !semantic_map.IsMap())
+        return fail("nodes[" + state_id + "].semantic must be a mapping of {node_name: STATE}.");
+
+      for (auto it = semantic_map.begin(); it != semantic_map.end(); ++it)
       {
-        return fail("nodes[" + std::to_string(i) + "] must be a mapping.");
-      }
-
-      const YAML::Node y_id = yn["id"];
-      if (!y_id || !y_id.IsScalar())
-      {
-        return fail("nodes[" + std::to_string(i) + "].id must be scalar.");
-      }
-      const std::string id = y_id.as<std::string>();
-      if (tmp_by_id.count(id))
-      {
-        return fail("Duplicate node id: '" + id + "'.");
-      }
-
-      TmpNode tmp;
-      tmp.id = id;
-      tmp.allowed = as_bool_or(yn["allowed"], true);
-
-      const YAML::Node y_sem = yn["semantic"];
-      if (!y_sem || !y_sem.IsMap())
-      {
-        return fail("nodes[" + id + "].semantic must be a mapping.");
-      }
-
-      // semantic の各キーを検証しつつ列挙に変換
-      for (auto it = y_sem.begin(); it != y_sem.end(); ++it)
-      {
-        const std::string key = it->first.as<std::string>();
-        if (!lifecycle_keys.count(key))
-        {
-          return fail("nodes[" + id + "].semantic has unknown key '" + key + "' not in lifecyclenodes.");
-        }
+        const std::string node_name = it->first.as<std::string>(); // 実ノード名
+        if (!lifecycle_node_names.count(node_name))
+          return fail("nodes[" + state_id + "].semantic has unknown node '" + node_name + "'.");
         if (!it->second.IsScalar())
-        {
-          return fail("nodes[" + id + "].semantic['" + key + "'] must be scalar.");
-        }
-        SemanticState::State st;
-        if (!parse_state(it->second.as<std::string>(), st))
-        {
-          return fail("nodes[" + id + "].semantic['" + key + "'] has invalid state.");
-        }
-        tmp.semantic.semantic_state[key] = st;
+          return fail("nodes[" + state_id + "].semantic['" + node_name + "'] must be scalar.");
+
+        SemanticState::State parsed;
+        if (!parse_state_string(it->second.as<std::string>(), parsed))
+          return fail("nodes[" + state_id + "].semantic['" + node_name + "'] has invalid state.");
+
+        temp_node.semantic.semantic_state[node_name] = parsed;
       }
 
-      // すべての lifecyclenodes のキーが semantic に現れているか（完全指定）をチェック
-      if (tmp.semantic.semantic_state.size() != lifecycle_keys.size())
-      {
-        return fail("nodes[" + id + "].semantic keys must match lifecyclenodes keys.");
-      }
+      if (temp_node.semantic.semantic_state.size() != lifecycle_node_names.size())
+        return fail("nodes[" + state_id + "].semantic must specify all lifecyclenodes.");
 
-      tmp_by_id.emplace(id, std::move(tmp));
+      accumulators_by_id.emplace(state_id, std::move(temp_node));
     }
 
-    // edges: from/to の存在を検証しつつ、各 from の next に recipe を追加
-    const YAML::Node y_edges = root["edges"];
-    if (!y_edges || !y_edges.IsSequence())
+    // ---- edges ----
+    const YAML::Node edges_seq = root_doc["edges"];
+    if (!edges_seq || !edges_seq.IsSequence())
+      return fail("'edges' must be a sequence.");
+
+    for (std::size_t edge_i = 0; edge_i < edges_seq.size(); ++edge_i)
     {
-      return fail("'edges' must exist and be a sequence.");
-    }
+      const YAML::Node edge_map = edges_seq[edge_i];
+      if (!edge_map.IsMap())
+        return fail("edges[" + std::to_string(edge_i) + "] must be a mapping.");
 
-    for (std::size_t i = 0; i < y_edges.size(); ++i)
-    {
-      const YAML::Node ye = y_edges[i];
-      if (!ye.IsMap())
+      const YAML::Node from_node = edge_map["from"];
+      const YAML::Node to_node = edge_map["to"];
+      if (!from_node || !from_node.IsScalar() || !to_node || !to_node.IsScalar())
+        return fail("edges[" + std::to_string(edge_i) + "] requires scalar 'from' and 'to'.");
+
+      const std::string from_id = from_node.as<std::string>();
+      const std::string to_id = to_node.as<std::string>();
+
+      auto from_it = accumulators_by_id.find(from_id);
+      if (from_it == accumulators_by_id.end())
+        return fail("edges[" + std::to_string(edge_i) + "].from '" + from_id + "' not found in nodes.");
+      if (!accumulators_by_id.count(to_id))
+        return fail("edges[" + std::to_string(edge_i) + "].to '" + to_id + "' not found in nodes.");
+
+      TransitionRecipe recipe; // 空でも可
+      const YAML::Node recipe_map = edge_map["transitionrecipe"];
+      if (recipe_map && recipe_map.IsMap())
       {
-        return fail("edges[" + std::to_string(i) + "] must be a mapping.");
-      }
-
-      const YAML::Node y_from = ye["from"];
-      const YAML::Node y_to = ye["to"];
-      if (!y_from || !y_from.IsScalar() || !y_to || !y_to.IsScalar())
-      {
-        return fail("edges[" + std::to_string(i) + "] requires scalar 'from' and 'to'.");
-      }
-      const std::string from_id = y_from.as<std::string>();
-      const std::string to_id = y_to.as<std::string>();
-
-      auto it_from = tmp_by_id.find(from_id);
-      if (it_from == tmp_by_id.end())
-      {
-        return fail("edges[" + std::to_string(i) + "].from '" + from_id + "' not found in nodes.");
-      }
-      if (!tmp_by_id.count(to_id))
-      {
-        return fail("edges[" + std::to_string(i) + "].to '" + to_id + "' not found in nodes.");
-      }
-
-      // レシピの読み取り（綴りの揺れを許容）
-      YAML::Node y_recipe = ye["transitionrecipe"];
-      if (!y_recipe)
-        y_recipe = ye["trantisionrecipe"]; // YAML サンプルの typo 吸収
-      TransitionRecipe recipe;
-
-      if (y_recipe && y_recipe.IsMap())
-      {
-        YAML::Node y_steps = y_recipe["actionsteps"];
-        if (!y_steps)
-          y_steps = y_recipe["actionteps"]; // こちらも typo 吸収
-
-        if (y_steps && y_steps.IsSequence())
+        const YAML::Node steps_seq = recipe_map["actionsteps"];
+        if (steps_seq && steps_seq.IsSequence())
         {
-          recipe.steps.reserve(y_steps.size());
-          for (std::size_t si = 0; si < y_steps.size(); ++si)
+          recipe.steps.reserve(steps_seq.size());
+          for (std::size_t step_i = 0; step_i < steps_seq.size(); ++step_i)
           {
-            const YAML::Node ys = y_steps[si];
-            if (!ys.IsMap())
-            {
-              return fail("edges[" + std::to_string(i) + "].recipe.steps[" + std::to_string(si) + "] must be a mapping.");
-            }
-            const YAML::Node y_key = ys["target_key"];
-            const YAML::Node y_op = ys["operation"];
-            const YAML::Node y_tout = ys["timeout_s"];
-            if (!y_key || !y_key.IsScalar() || !y_op || !y_op.IsScalar())
-            {
-              return fail("edges[" + std::to_string(i) + "].recipe.steps[" + std::to_string(si) + "] requires 'target_key' and 'operation'.");
-            }
-            const std::string target_key = y_key.as<std::string>();
-            if (!lifecycle_keys.count(target_key))
-            {
-              return fail("edges[" + std::to_string(i) + "].recipe.steps[" + std::to_string(si) + "].target_key '" + target_key + "' not in lifecyclenodes.");
-            }
+            const YAML::Node step_map = steps_seq[step_i];
+            if (!step_map.IsMap())
+              return fail("edges[" + std::to_string(edge_i) + "].steps[" + std::to_string(step_i) + "] must be a mapping.");
+
+            const YAML::Node target_node_name_node = step_map["target_node_name"];
+            const YAML::Node operation_node = step_map["operation"];
+            const YAML::Node timeout_node = step_map["timeout_s"];
+
+            if (!target_node_name_node || !target_node_name_node.IsScalar() ||
+                !operation_node || !operation_node.IsScalar())
+              return fail("edges[" + std::to_string(edge_i) + "].steps[" + std::to_string(step_i) + "] requires 'target_node_name' and 'operation'.");
+
+            const std::string target_node_name = target_node_name_node.as<std::string>();
+            if (!lifecycle_node_names.count(target_node_name))
+              return fail("edges[" + std::to_string(edge_i) + "].steps[" + std::to_string(step_i) + "]: unknown node '" + target_node_name + "'.");
+
             ActionStep step;
-            step.target_key = target_key;
-            step.operation = y_op.as<std::string>();
-            step.timeout_s = as_double_or(y_tout, 0.0);
+            step.target_node_name = target_node_name;
+            step.operation = operation_node.as<std::string>();
+            step.timeout_s = get_scalar_double_or(timeout_node, 5.0);
             recipe.steps.push_back(std::move(step));
           }
         }
-        // steps が無くても空レシピとして許容
       }
 
-      // from ノードの next に to_id -> recipe を登録
-      auto &from_tmp = it_from->second;
-      if (from_tmp.next.count(to_id))
-      {
+      TempNode &from_acc = from_it->second;
+      if (from_acc.outgoing.count(to_id))
         return fail("Duplicate edge from '" + from_id + "' to '" + to_id + "'.");
-      }
-      from_tmp.next.emplace(to_id, std::move(recipe));
+      from_acc.outgoing.emplace(to_id, std::move(recipe));
     }
 
-    // 最後に Graph を構築。TmpNode から Node を生成してベクタへ。
+    // ---- Graph 構築 ----
     std::vector<Node> nodes;
-    nodes.reserve(tmp_by_id.size());
-    for (auto &kv : tmp_by_id)
+    nodes.reserve(accumulators_by_id.size());
+    for (auto &kv : accumulators_by_id)
     {
-      TmpNode &t = kv.second;
-      nodes.emplace_back(t.id,
-                         std::move(t.next),
-                         std::move(t.semantic));
+      TempNode &temp_node = kv.second;
+      nodes.emplace_back(temp_node.id, std::move(temp_node.outgoing), std::move(temp_node.semantic));
     }
-
     return Graph(std::move(nodes));
   }
 

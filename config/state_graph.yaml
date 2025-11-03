@@ -1,24 +1,22 @@
 lifecyclenodes:
-  gnss:
-    node_name: "gnss"
-  emcl:
-    node_name: "emcl2"
+  - "gnss"
+  - "emcl2"
 
 nodes:
   - id: GNSS_ONLY
-    semantic: { gnss: ACTIVE,  emcl: INACTIVE }
+    semantic: { gnss: ACTIVE,  emcl2: INACTIVE }
     allowed: true
 
   - id: EMCL_ONLY
-    semantic: { gnss: INACTIVE, emcl: ACTIVE }
+    semantic: { gnss: INACTIVE, emcl2: ACTIVE }
     allowed: true
 
   - id: BOTH_ACTIVE
-    semantic: { gnss: ACTIVE,  emcl: ACTIVE }
+    semantic: { gnss: ACTIVE,  emcl2: ACTIVE }
     allowed: false
 
   - id: BOTH_INACTIVE
-    semantic: { gnss: INACTIVE, emcl: INACTIVE }
+    semantic: { gnss: INACTIVE, emcl2: INACTIVE }
     allowed: true
 
 edges:
