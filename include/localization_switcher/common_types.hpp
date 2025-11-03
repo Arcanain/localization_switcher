@@ -51,6 +51,7 @@ namespace localization_switcher
     };
 
     // 意思決定結果（Component→Node）
+    /*
     struct Decision
     {
         std::string from; // 現在モード
@@ -58,12 +59,15 @@ namespace localization_switcher
         TransitionRecipe recipe;
         std::string reason; // ログ・診断用
     };
+    */
 
     // 実行結果NodeからComponentへ返す
+    /*
     struct ExecResult
     {
         bool success;
         std::string message;
     };
+    */
 
 } // namespace localization_switcher
