@@ -12,20 +12,41 @@ namespace localization_switcher
         load_parameters_from_yaml(yaml_path);
     }
 
-    std::optional<TransitionRecipe> LocalizationSwitcherComponent::TransitionDecider::decide_transition(
+    std::optional<const TransitionRecipe*> LocalizationSwitcherComponent::TransitionDecider::decide_transition(
         WorldState current_world)
     {
         // component_のpublicメンバやfriend経由でprivateメンバにアクセス可能
+        if (switch_point_.empty() || current_point_index_ >= static_cast<int>(switch_point_.size())) {
+            return std::nullopt;
+        }
 
-        if (component_.current_node_ == nullptr) return std::nullopt;
 
-        if (component_.current_node_->node_id == "GNSS_ONLY")
+        const auto& [target_state, to_id] = switch_point_[current_point_index_];
+
+        // 標準出力
+        // デバッグ出力（構造化束縛した変数をそのまま使う）
+        std::cout   << "[TransitionDecider] idx=" << current_point_index_
+                    << " target=(" << target_state.x << ", " << target_state.y << ")"
+                    << " to=" << to_id
+                    << " current=" << component_.current_node_->id()
+                    << std::endl;
+
+
+        if (component_.current_node_ == nullptr)        return std::nullopt;
+        if (component_.current_node_->id() == to_id) return std::nullopt;
+    
+
+
+        //if (component_.current_node_->node_id == "GNSS_ONLY") 
+        if (to_id == "EMCL_ONLY") //本来はcurrent_node_-> node_id と to_idのりょうほうをつかうべき
         {
             // current_node_-> id がgnssの場合
             if (shouldSwitchToEmcl_(std::chrono::steady_clock::now(), current_world)) return component_.current_node_->recipe_to("EMCL_ONLY");
         }
 
-        if (component_.current_node_->node_id == "EMCL_ONLY")
+
+        //if (component_.current_node_->node_id == "EMCL_ONLY")
+        if (to_id == "GNSS_ONLY")
         {
             // current_node_-> id がgnssの場合
             if (shouldSwitchToGnss_(std::chrono::steady_clock::now(), current_world)) return component_.current_node_->recipe_to("GNSS_ONLY");
@@ -48,7 +69,7 @@ namespace localization_switcher
     {
         if (current_point_index_ >= static_cast<int>(switch_point_.size())) return false;
 
-        WorldState target = switch_point_[current_point_index_]; // switch pointを取得
+        const WorldState& target = std::get<0>(switch_point_[current_point_index_]);
 
         if (!reach_flag_) reach_flag_ = isLessThanThreshold_(target, current_world, d_th_to_gnss_);
         
@@ -81,7 +102,7 @@ namespace localization_switcher
     {
         if (current_point_index_ >= static_cast<int>(switch_point_.size())) return false;
 
-        WorldState target = switch_point_[current_point_index_]; // switch pointを取得
+        const WorldState& target = std::get<0>(switch_point_[current_point_index_]);
 
         if (!reach_flag_) reach_flag_ = isLessThanThreshold_(target, current_world, d_th_to_emcl_);
         
@@ -109,62 +130,56 @@ namespace localization_switcher
     }
 
 
-    // TransitionDecider のメンバ関数として実装
-// yaml: 
-// decider:
-//   switch_points:
-//     - { x: 10.0, y: 5.0 }
-//     - { x: 25.0, y: 8.0 }
-//     - { x: 50.0, y: -3.0 }
+// TransitionDecider のメンバ関数として実装
+
+
 void LocalizationSwitcherComponent::TransitionDecider::load_parameters_from_yaml(
     const std::string& yaml_path)
 {
     YAML::Node root;
     try {
         root = YAML::LoadFile(yaml_path);
-    } catch (const std::exception& e) {
+    } 
+    catch (const std::exception& e) {
         std::cerr << "[TransitionDecider] YAML load failed: " << e.what() << std::endl;
         return;
     }
 
-    const YAML::Node decider = root["decider"];
-    if (!decider || !decider.IsMap()) {
-        std::cerr << "[TransitionDecider] 'decider' section is missing or not a map." << std::endl;
+    const YAML::Node dec = root["decider"];
+    if (!dec || !dec.IsMap()) {
+        std::cerr << "[TransitionDecider] 'decider' section missing." << std::endl;
         return;
     }
 
-    const YAML::Node switch_points = decider["switch_points"];
-    if (!switch_points || !switch_points.IsSequence()) {
+    const YAML::Node pts = dec["switch_points"];
+    if (!pts || !pts.IsSequence()) {
         std::cerr << "[TransitionDecider] 'decider.switch_points' must be a sequence." << std::endl;
         return;
     }
 
     switch_point_.clear();
-    switch_point_.reserve(switch_points.size());
+    switch_point_.reserve(pts.size());
 
-    for (std::size_t i = 0; i < switch_points.size(); ++i) {
-        const YAML::Node p = switch_points[i];
+    for (std::size_t i = 0; i < pts.size(); ++i) {
+        const YAML::Node p = pts[i];
         if (!p.IsMap()) {
             std::cerr << "[TransitionDecider] switch_points[" << i << "] must be a map." << std::endl;
             continue;
-        }
-        const YAML::Node xn = p["x"];
-        const YAML::Node yn = p["y"];
-        if (!xn || !xn.IsScalar() || !yn || !yn.IsScalar()) {
-            std::cerr << "[TransitionDecider] switch_points[" << i << "] requires scalar 'x' and 'y'." << std::endl;
+            }
+
+        if (!p["x"] || !p["y"] || !p["to"]) {
+            std::cerr << "[TransitionDecider] switch_points[" << i << "] requires x, y, to." << std::endl;
             continue;
         }
 
-        const double x = xn.as<double>();
-        const double y = yn.as<double>();
+        const double x = p["x"].as<double>();
+        const double y = p["y"].as<double>();
+        const std::string to_id = p["to"].as<std::string>();
 
-        // fix_status はここでは未使用のためダミー false を格納
-        switch_point_.push_back(WorldState{ x, y, /*fix_status=*/false });
+        switch_point_.emplace_back(WorldState{x, y, false}, to_id);
     }
 
-    // 読み直し時の状態をクリア
     current_point_index_ = 0;
-    reach_flag_ = false;
     gnss_transition_timer_start_ = std::chrono::steady_clock::time_point{};
     emcl_transition_timer_start_ = std::chrono::steady_clock::time_point{};
     reach_flag_ = false;
@@ -174,9 +189,8 @@ void LocalizationSwitcherComponent::TransitionDecider::load_parameters_from_yaml
     d_th_to_emcl_ = 5.0;
     current_point_index_ = 0;
 
-    if (switch_point_.empty()) {
+    if (switch_point_.empty())
         std::cerr << "[TransitionDecider] No valid switch_points loaded." << std::endl;
-    }
 }
 
 } // namespace localization_switcher

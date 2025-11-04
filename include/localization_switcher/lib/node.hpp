@@ -17,7 +17,7 @@ namespace localization_switcher
         );
 
 
-        const std::string &id() const;
+        const std::string &id() const noexcept;
         std::vector<std::string> next_ids() const;
         const TransitionRecipe* recipe_to(const std::string& to_id) const noexcept; 
         const SemanticState& semantic() const noexcept;

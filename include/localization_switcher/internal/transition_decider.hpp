@@ -17,7 +17,7 @@ namespace localization_switcher
     explicit TransitionDecider(LocalizationSwitcherComponent &comp, const std::string& yaml_path);
     
     // 遷移判定のメインロジック
-    std::optional<TransitionRecipe> decide_transition(WorldState current_world);
+    std::optional<const TransitionRecipe*> decide_transition(WorldState current_world);
 
   private:
     LocalizationSwitcherComponent &component_;
@@ -42,7 +42,7 @@ namespace localization_switcher
     bool isLessThanThreshold_(const WorldState target, const WorldState current, const double threshold) const;
     bool shouldSwitchToGnss_(const std::chrono::steady_clock::time_point &now, WorldState current_world);
     bool shouldSwitchToEmcl_(const std::chrono::steady_clock::time_point &now, WorldState current_world);
-    void LocalizationSwitcherComponent::TransitionDecider::load_parameters_from_yaml(const std::string& yaml_path);
+    void load_parameters_from_yaml(const std::string& yaml_path);
   };
 
 } // namespace localization_switcher

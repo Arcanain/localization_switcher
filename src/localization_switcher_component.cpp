@@ -9,6 +9,7 @@ namespace
 {
   // 完全一致で最初のものを返す素朴な規則。
   // 将来、優先キーや重み付けなどに変えるなら、この関数だけを書き換えればよい。
+  /*
   const localization_switcher::Node *
   select_by_semantics(const localization_switcher::SemanticState &s,
                       const std::vector<localization_switcher::Node> &nodes)
@@ -18,6 +19,7 @@ namespace
         return &n;
     return nullptr;
   }
+  */
 } // anonymous
 
 namespace localization_switcher
@@ -59,7 +61,7 @@ namespace localization_switcher
 
   std::chrono::system_clock::time_point LocalizationSwitcherComponent::current_stamp() const noexcept { return current_stamp_; }
 
-  std::optional<TransitionRecipe> LocalizationSwitcherComponent::decide(
+  std::optional<const TransitionRecipe*> LocalizationSwitcherComponent::decide(
       const WorldState &world,
       const SemanticState &semantic,
       TimePoint stamp)
@@ -67,8 +69,8 @@ namespace localization_switcher
     // セマンティック状態とタイムスタンプの更新
     current_semantic_ = semantic;
     current_stamp_ = (stamp.time_since_epoch().count() == 0)
-                         ? std::chrono::system_clock::now()
-                         : stamp;
+                          ? std::chrono::system_clock::now()
+                          : stamp;
 
     // 現在のノードを取得
     current_node_ = graph_.get_current_node(current_semantic_);

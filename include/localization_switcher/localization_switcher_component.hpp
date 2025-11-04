@@ -24,7 +24,7 @@ namespace localization_switcher
     const SemanticState &current_semantic() const noexcept;
     std::chrono::system_clock::time_point current_stamp() const noexcept;
 
-    std::optional<TransitionRecipe> decide(
+    std::optional<const TransitionRecipe*> decide(
         const WorldState &world,
         const SemanticState &semantic,
         TimePoint stamp = TimePoint{});
