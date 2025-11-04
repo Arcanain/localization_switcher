@@ -3,9 +3,10 @@
 #include <optional>
 #include <chrono>
 #include <vector>
+#include <tuple>
+#include <iostream>
 #include <cmath>
 #include <yaml-cpp/yaml.h>
-#include <iostream>
 
 namespace localization_switcher
 {
@@ -34,7 +35,7 @@ namespace localization_switcher
     double d_th_to_gnss_ ;   // emcl -> gnss ポイントの距離閾値
     double d_th_to_emcl_ ;   // gnss -> emcl ポイントの距離閾値
 
-    std::vector<WorldState> switch_point_;      // 切り替えポイントのリスト
+    std::vector<std::tuple<WorldState, std::string>> switch_point_;    // 切り替えポイントのリスト
     int current_point_index_ ;  // 切り替えポイントのインデックス
 
     // 判定用のprivateメソッド
