@@ -13,7 +13,9 @@ namespace
   select_by_semantics(const localization_switcher::SemanticState &s,
                       const std::vector<localization_switcher::Node> &nodes)
   {
-    for (const auto &n : nodes) if (s == n.semantic()) return &n;
+    for (const auto &n : nodes)
+      if (s == n.semantic())
+        return &n;
     return nullptr;
   }
 } // anonymous
@@ -21,27 +23,31 @@ namespace
 namespace localization_switcher
 {
   // コンストラクタ
-  LocalizationSwitcherComponent::LocalizationSwitcherComponent(const std::string &yaml_path)
-      : yaml_path_(yaml_path),
+  LocalizationSwitcherComponent::LocalizationSwitcherComponent(
+      const std::string &graph_yaml_path,
+      const std::string &decider_yaml_path)
+      : graph_yaml_path_(graph_yaml_path),
+        decider_yaml_path_(decider_yaml_path),
         current_node_(nullptr)
   {
     // 内部クラスのインスタンス作成
-    decider_ = std::make_unique<TransitionDecider>(*this);
-    if (!initialize_(yaml_path_)) std::cerr << "Warning: Failed to initialize LocalizationSwitcherComponent" << std::endl;
+    decider_ = std::make_unique<TransitionDecider>(*this, decider_yaml_path_);
+    if (!initialize_(graph_yaml_path_))
+      std::cerr << "Warning: Failed to initialize LocalizationSwitcherComponent" << std::endl;
   }
 
   // デストラクタ
   LocalizationSwitcherComponent::~LocalizationSwitcherComponent() = default;
 
-  bool LocalizationSwitcherComponent::initialize_(const std::string &yaml_path)
+  bool LocalizationSwitcherComponent::initialize_(const std::string &graph_yaml_path)
   {
-    yaml_path_ = yaml_path;
+    graph_yaml_path_ = graph_yaml_path;
 
     // GraphBuilderを使ってYAMLからGraphを構築
-    auto graph_opt = GraphBuilder::build_from_yaml(yaml_path_);
+    auto graph_opt = GraphBuilder::build_from_yaml(graph_yaml_path_);
     if (!graph_opt.has_value())
     {
-      std::cerr << "Failed to build graph from YAML: " << yaml_path_ << std::endl;
+      std::cerr << "Failed to build graph from YAML: " << graph_yaml_path_ << std::endl;
       return false;
     }
 
@@ -61,14 +67,15 @@ namespace localization_switcher
     // セマンティック状態とタイムスタンプの更新
     current_semantic_ = semantic;
     current_stamp_ = (stamp.time_since_epoch().count() == 0)
-                        ? std::chrono::system_clock::now()
-                        : stamp;
+                         ? std::chrono::system_clock::now()
+                         : stamp;
 
     // 現在のノードを取得
-    current_node_ = graph_.get_current_node(current_semantic);
+    current_node_ = graph_.get_current_node(current_semantic_);
     // current_node_ = graph_.get_current_node(semantic, &select_by_semantics);
-    
-    if (current_node_ == nullptr) return std::nullopt;
+
+    if (current_node_ == nullptr)
+      return std::nullopt;
 
     // 内部クラスに遷移判定を委譲
     return decider_->decide_transition(world);

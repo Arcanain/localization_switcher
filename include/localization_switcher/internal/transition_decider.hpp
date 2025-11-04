@@ -2,6 +2,10 @@
 #include "localization_switcher/localization_switcher_component.hpp"
 #include <optional>
 #include <chrono>
+#include <vector>
+#include <cmath>
+#include <yaml-cpp/yaml.h>
+#include <iostream>
 
 namespace localization_switcher
 {
@@ -9,7 +13,7 @@ namespace localization_switcher
   class LocalizationSwitcherComponent::TransitionDecider
   {
   public:
-    explicit TransitionDecider(LocalizationSwitcherComponent &comp);
+    explicit TransitionDecider(LocalizationSwitcherComponent &comp, const std::string& yaml_path);
     
     // 遷移判定のメインロジック
     std::optional<TransitionRecipe> decide_transition(WorldState current_world);
@@ -37,6 +41,7 @@ namespace localization_switcher
     bool isLessThanThreshold_(const WorldState target, const WorldState current, const double threshold) const;
     bool shouldSwitchToGnss_(const std::chrono::steady_clock::time_point &now, WorldState current_world);
     bool shouldSwitchToEmcl_(const std::chrono::steady_clock::time_point &now, WorldState current_world);
+    void LocalizationSwitcherComponent::TransitionDecider::load_parameters_from_yaml(const std::string& yaml_path);
   };
 
 } // namespace localization_switcher

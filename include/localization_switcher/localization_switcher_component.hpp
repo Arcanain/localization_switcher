@@ -17,7 +17,8 @@ namespace localization_switcher
   public:
     using Clock = std::chrono::system_clock;
     using TimePoint = std::chrono::time_point<Clock>;
-    explicit LocalizationSwitcherComponent(const std::string &yaml_path);
+    explicit LocalizationSwitcherComponent( const std::string &graph_yaml_path,
+                                            const std::string &decider_yaml_path);
     ~LocalizationSwitcherComponent();
 
     const SemanticState &current_semantic() const noexcept;
@@ -34,7 +35,8 @@ namespace localization_switcher
     friend class TransitionDecider;
 
     // メンバ変数
-    std::string yaml_path_;
+    std::string graph_yaml_path_;
+    std::string decider_yaml_path_;
     Graph graph_;
     SemanticState current_semantic_;
     TimePoint current_stamp_;
